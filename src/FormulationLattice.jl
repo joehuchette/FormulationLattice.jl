@@ -74,7 +74,7 @@ for (T,connector) in [(:And," ∧ "), (:Or," ∨ ")]; @eval begin
     # helper that percolates like clauses up to toplevel, e.g.
     # A ∧ (B ∧ C) to A ∧ B ∧ C
     function $T(clauses::Clause...)
-        length(clauses) > 1 || error("Unary $T not allowed")
+        length(clauses) > 1 || error("Unary $($T) not allowed")
         terms = Clause[]
         for cl in clauses
             append!(terms, percolate($T, cl))
@@ -171,7 +171,11 @@ function _basicstep(c::And, idx::Int)
     tail = cl.clauses[2:end]
     before = c.clauses[1:(idx-1)]
     after  = c.clauses[(idx+1):n]
-    And(before..., tip, after...) ∨ And(before..., tail..., after...)
+    if length(tail) == 1
+        And(before..., tip, after...) ∨ And(before..., tail[1], after...)
+    else
+        And(before..., tip, after...) ∨ And(before..., Or(tail...), after...)
+    end
 end
 
 end
