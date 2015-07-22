@@ -1,7 +1,8 @@
 module FormulationLattice
 
 import Base: &, |
-export Literal, And, ∧, Or, ∨, isliteral, iscnf, isdnf, basicstep, dnf
+export Literal, @Literal, @Literals, And, ∧, Or, ∨,
+       isliteral, iscnf, isdnf, basicstep, dnf
 
 abstract Clause
 Base.show(io::IO, x::Clause) = print(io, x)
@@ -16,6 +17,24 @@ let counter = 0
     Literal() = (counter += 1; Literal(default_names[counter]))
 end
 
+macro Literal(name)
+    @assert isa(name, Symbol)
+    :($(esc(name)) = Literal($(string(name))))
+end
+
+macro Literals(args)
+    names = isa(args,Symbol) ? [args] : args.args
+
+    @assert all(x -> (isa(x,Symbol)), names)
+    code = Expr(:block)
+    lastline = Expr(:tuple)
+    for name in names
+        push!(code.args, :($(esc(name)) = Literal($(string(name)))))
+        push!(lastline.args, :($(esc(name))))
+    end
+    :($code; $lastline)
+end
+
 Base.print(io::IO, l::Literal) = print(io, l.name)
 
 # percolate
@@ -26,14 +45,14 @@ function percolate{T<:Clause}(::Type{T}, cl::T)
     vcat(x...)
 end
 
-type And <: Clause
+immutable And <: Clause
     clauses::Vector{Clause}
 end
 
 (&)(clauses::Clause...) = And(clauses...)
 const ∧ = &
 
-type Or <: Clause
+immutable Or <: Clause
     clauses::Vector{Clause}
 end
 Or( clauses::Clause...) = Or(collect(clauses))
@@ -44,6 +63,7 @@ for (T,connector) in [(:And," ∧ "), (:Or," ∨ ")]; @eval begin
     # helper that percolates like clauses up to toplevel, e.g.
     # A ∧ (B ∧ C) to A ∧ B ∧ C
     function $T(clauses::Clause...)
+        length(clauses) > 1 || error("Unary $T not allowed")
         terms = Clause[]
         for cl in clauses
             append!(terms, percolate($T, cl))
@@ -69,7 +89,21 @@ isand(c::Clause)     = isa(c,And)
 isor(c::Clause)      = isa(c,Or)
 
 ==(c::Literal, d::Literal) = c.name == d.name
-=={C<:Clause}(c::C, d::C)  = c.clauses == d.clauses
+
+# #
+# =={C<:Clause}(c::C, d::C) = Set(c.clauses) == Set(d.clauses)
+# function =={C<:Clause}(c::C, d::C)
+#     cset, dset = Set(c.clauses), Set(d.clauses)
+#     for item in cset
+#         foundmatch = false
+#         for t in dset
+#             @show item, t
+#             foundmatch |= (item == t)
+#         end
+#         foundmatch || return false
+#     end
+#     true
+# end
 
 Base.copy(x::Literal)      = Literal(copy(x.name))
 Base.copy{C<:Clause}(x::C) = C(copy(x.clauses))
@@ -81,7 +115,7 @@ Base.copy{C<:Clause}(x::C) = C(copy(x.clauses))
 # (A ⋁ B ⋁ C) ⋀ D
 # Probably add "sanitizers" to inner constructors to clauses above?
 iscnf(c::Literal) = true
-iscnf(c::Or)      = false
+iscnf(c::Or)      = all(isliteral, c.clauses)
 iscnf(c::And)     = all(c.clauses) do cl
     isliteral(cl) | (isor(cl) && all(isliteral, cl.clauses))
 end
@@ -90,13 +124,12 @@ isdnf(c::Literal) = true
 isdnf(c::Or)      = all(c.clauses) do cl
     isliteral(cl) | (isand(cl) && all(isliteral, cl.clauses))
 end
-isdnf(c::And)     = false
+isdnf(c::And)     = all(isliteral, c.clauses)
 
 function dnf(c::Clause)
     # Compute disjunctive normal form of clause c
     cl = c
     while !isdnf(cl)
-        # compute basic step?
         cl = basicstep(cl)
     end
     cl
@@ -104,11 +137,12 @@ end
 
 function basicstep(c::Or)
     isdnf(c) && return c
+    n = length(c.clauses)
     idx = findfirst(x -> !isdnf(x), c.clauses)
     newterm = basicstep(c.clauses[idx])
-    cl = copy(c)
-    cl.clauses[idx] = newterm
-    Or(cl.clauses...)
+    before = c.clauses[1:(idx-1)]
+    after  = c.clauses[(idx+1):n]
+    Or(before..., newterm, after...)
 end
 
 function basicstep(c::And)
@@ -124,7 +158,9 @@ function _basicstep(c::And, idx::Int)
     @assert isa(cl, Or)
     tip  = cl.clauses[1]
     tail = cl.clauses[2:end]
-    Or([(tip & x) for x in remaining]..., [(t & x) for (t,x) in zip(tail,remaining)]...)
+    before = c.clauses[1:(idx-1)]
+    after  = c.clauses[(idx+1):n]
+    And(before..., tip, after...) ∨ And(before..., tail..., after...)
 end
 
 end
