@@ -99,23 +99,6 @@ isliteral(c::Clause) = isa(c, Literal)
 isand(c::Clause)     = isa(c,And)
 isor(c::Clause)      = isa(c,Or)
 
-==(c::Literal, d::Literal) = c.name == d.name
-
-# #
-# =={C<:Clause}(c::C, d::C) = Set(c.clauses) == Set(d.clauses)
-# function =={C<:Clause}(c::C, d::C)
-#     cset, dset = Set(c.clauses), Set(d.clauses)
-#     for item in cset
-#         foundmatch = false
-#         for t in dset
-#             @show item, t
-#             foundmatch |= (item == t)
-#         end
-#         foundmatch || return false
-#     end
-#     true
-# end
-
 Base.copy(x::Literal)      = Literal(copy(x.name))
 Base.copy{C<:Clause}(x::C) = C(copy(x.clauses))
 
@@ -137,11 +120,15 @@ isdnf(c::Or)      = all(c.clauses) do cl
 end
 isdnf(c::And)     = all(isliteral, c.clauses)
 
-function dnf(c::Clause)
+include("formulations.jl")
+
+function dnf(c::Clause, formtrack=FormulaState[])
     # Compute disjunctive normal form of clause c
     cl = c
+    push!(formtrack, FormulaState(cl))
     while !isdnf(cl)
         cl = basicstep(cl)
+        push!(formtrack, FormulaState(cl))
     end
     cl
 end
@@ -153,12 +140,14 @@ function basicstep(c::Or)
     newterm = basicstep(c.clauses[idx])
     before = c.clauses[1:(idx-1)]
     after  = c.clauses[(idx+1):n]
-    Or(before..., newterm, after...)
+    ret = Or(before..., newterm, after...)
+    ret
 end
 
 function basicstep(c::And)
     idx = findfirst(x -> isa(x,Or), c.clauses)
-    _basicstep(c, idx)
+    ret = _basicstep(c, idx)
+    ret
 end
 
 function _basicstep(c::And, idx::Int)
