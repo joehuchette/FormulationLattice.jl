@@ -22,8 +22,19 @@ macro Literal(name)
     :($(esc(name)) = Literal($(string(name))))
 end
 
-macro Literals(args)
-    names = isa(args,Symbol) ? [args] : args.args
+macro Literals(args...)
+    names = if isa(args,Symbol)
+        [args]
+    elseif isa(args,Expr)
+        @assert args.head == :tuple
+        args.args
+    else
+        if isa(args,Tuple{Expr})
+            args[1].args
+        else
+            [args...]
+        end
+    end
 
     @assert all(x -> (isa(x,Symbol)), names)
     code = Expr(:block)
